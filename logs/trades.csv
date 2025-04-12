@@ -1,0 +1,2 @@
+timestamp,symbol,side,quantity,price,volatility,order_type,cash,net_worth
+2025-04-12 12:30:28,HACK,sell,4,86.53,0.18,market,9531.6,9964.25

@@ -25,17 +25,28 @@ auth = (str(user_id), config["password"])
 
 strategy_fn, strategy_params = select_strategy(strategy_name)
 
+# --- Session State ---
 last_signal = None
 last_price = None
 pending_limit_order_id = None
 pending_limit_timestamp = None
+session_start_time = time.time()
+last_exposure_time = None
+total_limit_orders = 0
+total_market_orders = 0
+total_signals = 0
+last_networth = None
 
 # --- MAIN LOOP ---
 def run_trading_loop(interval=60):
     global last_signal, last_price, pending_limit_order_id, pending_limit_timestamp
+    global last_exposure_time, total_limit_orders, total_market_orders, total_signals, last_networth
+
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🌀 Starting trading loop on {symbol}, interval = {interval}s")
 
     while True:
+        loop_start = time.time()
+
         account = get_account(auth)
         cash = float(account.get("cash", 0))
         positions = account.get("open_positions") or account.get("positions") or {}
@@ -52,8 +63,8 @@ def run_trading_loop(interval=60):
         net_worth = float(account.get("networth", cash + position * current_price))
         orderbook = market_data.get("orderbook", {})
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💼 Account: Cash = ${cash:.2f} | {symbol} = {position} | Net Worth = ${net_worth:.2f}")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💲 Current Price: {current_price:.2f}")
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💼 Cash=${cash:.2f} | {symbol}={position} | NW=${net_worth:.2f}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📈 Price=${current_price:.2f} | Volatility={volatility:.4f}")
 
         try:
             signal = strategy_fn(symbol, **strategy_params)
@@ -63,6 +74,7 @@ def run_trading_loop(interval=60):
             continue
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📊 Strategy Signal: {signal}")
+        total_signals += 1
 
         # Cancel stale orders
         if pending_limit_order_id and time.time() - pending_limit_timestamp > stale_limit_lifetime:
@@ -72,43 +84,35 @@ def run_trading_loop(interval=60):
             pending_limit_timestamp = None
             last_signal = None
 
-        # Only act if signal has changed
+        # Trade decision pipeline
         if signal != last_signal and signal in ["buy", "sell"]:
             has_held_long = position > 0 and net_worth < (cash + position * current_price * 0.995)
-            signal_strength = abs(volatility) * 100
             price_delta = abs((last_price or current_price) - current_price) / current_price
-            loosen_filters = signal_strength > 1.5 or has_held_long or price_delta > 0.01
+            loosen_filters = abs(volatility) * 100 > 1.5 or has_held_long or price_delta > 0.01
 
-            print(f"[FILTER] Loosened: {loosen_filters} | ΔPrice: {price_delta:.4f} | Held Long: {has_held_long}")
+            print(f"[FILTER] ΔPrice={price_delta:.4f} | HeldLong={has_held_long} | Loosen={loosen_filters}")
 
             band_confirm = confirm_with_volatility_band(current_price, current_price, volatility)
             ob_confirm = confirm_with_orderbook_pressure(orderbook, signal)
-
-            print(f"[FILTER CHECK] Band: {band_confirm} | OB: {ob_confirm} | Raw: {signal}")
+            print(f"[FILTER CHECK] Band={band_confirm} | OB={ob_confirm} | Raw={signal}")
 
             if not loosen_filters and band_confirm != signal:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Blocked by volatility band")
+                print("❌ Blocked by volatility band filter")
                 continue
-
             if not loosen_filters and not ob_confirm:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Blocked by orderbook pressure")
+                print("❌ Blocked by orderbook pressure filter")
                 continue
 
             quantity = compute_position_size(cash, current_price, volatility)
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📐 Quantity: {quantity} | Volatility: {volatility:.3f}")
+            print(f"📐 Computed Qty: {quantity} | Volatility={volatility:.4f}")
 
             if signal == "sell" and position == 0:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Cannot SELL — you hold 0 shares.")
+                print("⚠️ Cannot SELL — no holdings.")
                 continue
 
-            if volatility > 0.08:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚡ Using MARKET order (High Volatility)")
-                order_type = "market"
-                limit_price = None
-            else:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🧠 Using LIMIT order (Low Volatility)")
-                order_type = "limit"
-                limit_price = limit_order_price(signal, current_price)
+            order_type = "market" if volatility > 0.08 else "limit"
+            limit_price = None if order_type == "market" else limit_order_price(signal, current_price)
+            print(f"📝 Order Type: {order_type.upper()} | Limit Price: {limit_price or '—'}")
 
             response = place_order(
                 user_id=user_id,
@@ -120,21 +124,39 @@ def run_trading_loop(interval=60):
                 auth=auth
             )
 
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Order Placed: {response}")
+            print(f"✅ Order Placed: {response}")
 
             if response:
                 log_trade(symbol, signal, quantity, current_price, volatility, order_type, cash, net_worth)
 
-            if order_type == "limit" and response and "order_id" in response:
-                pending_limit_order_id = response["order_id"]
-                pending_limit_timestamp = time.time()
+                if order_type == "limit" and "order_id" in response:
+                    pending_limit_order_id = response["order_id"]
+                    pending_limit_timestamp = time.time()
+
+                if order_type == "market":
+                    total_market_orders += 1
+                else:
+                    total_limit_orders += 1
+
+                if position == 0 and signal == "buy":
+                    last_exposure_time = loop_start
 
             last_signal = signal
 
         else:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⏸ No signal change.")
+            print(f"⏸ No signal change.")
 
+        # --- Session Metrics ---
+        if last_exposure_time and position > 0:
+            exposure_duration = time.time() - last_exposure_time
+            print(f"⏱️ Holding HACK for {exposure_duration:.1f} seconds")
+        if last_networth is not None:
+            delta = net_worth - last_networth
+            print(f"💰 Net Worth Δ: {'+' if delta >= 0 else ''}{delta:.2f}")
+        last_networth = net_worth
         last_price = current_price
+
+        print(f"📊 Orders — Limit: {total_limit_orders}, Market: {total_market_orders}, Signals: {total_signals}")
         time.sleep(interval)
 
 # --- CLI ---

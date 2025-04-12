@@ -21,3 +21,5 @@ timestamp,symbol,side,quantity,price,volatility,order_type,cash,net_worth
 2025-04-12 14:48:57,HACK,buy,1,81.38,0.37,limit,2173.11,14054.59
 2025-04-12 15:25:04,HACK,sell,1,77.54,0.38,limit,434.93,18036.51
 2025-04-12 16:40:54,HACK,sell,1,48.96,0.36,limit,1.92,12682.56
+2025-04-12 17:06:02,HACK,buy,1,43.94,0.26,limit,1.21,11381.67
+2025-04-12 17:30:15,HACK,sell,1,71.64,0.26,limit,29.76,18584.52

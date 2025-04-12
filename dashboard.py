@@ -43,8 +43,6 @@ if view == "📈 Live Dashboard":
     # Fetch current price and check if it's valid (i.e., not None)
     current_price = market_data["stock"].get("price")
 
-    # Debugging: Log the values to see why they might be None
-    st.write(f"Current Price: {current_price}")
 
     # Add validation for None values
     if current_price is None:
@@ -97,9 +95,6 @@ if view == "📈 Live Dashboard":
         st.json(orderbook.get("buy_orders", []))
         st.write("🔴 Sell Orders")
         st.json(orderbook.get("sell_orders", []))
-
-    with st.expander("🐞 Raw Orderbook Data"):
-        st.json(orderbook)
 
     st.markdown("### 📊 Order Book Depth Chart")
     buy_levels = orderbook.get("buy_orders", [])
@@ -180,8 +175,6 @@ elif view == "📚 Trade History":
     # Ensure timestamp is in datetime format for proper filtering
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')  # 'coerce' converts invalid dates to NaT
     
-    # Debug: Check the format of the data before filtering
-    st.write(f"Loaded Trade Data (before filtering):\n{df.head()}")
     
     # Ensure there are no missing or invalid timestamps
     if df["timestamp"].isnull().any():
@@ -201,15 +194,10 @@ elif view == "📚 Trade History":
     with filter_col3:
         order_type = st.selectbox("Order Type", df["order_type"].unique())
 
-    # Debug: Check the selected filtering criteria
-    st.write(f"Selected Filter Criteria - Start Date: {start_date}, End Date: {end_date}, Order Type: {order_type}")
 
     # Convert start and end date to datetime and normalize time (set to midnight)
     start_date = pd.to_datetime(start_date).normalize()
     end_date = pd.to_datetime(end_date).normalize()
-
-    # Debug: Show normalized dates
-    st.write(f"Normalized Start Date: {start_date}, Normalized End Date: {end_date}")
 
     # Filter the data based on user input (date only, ignoring time)
     filtered_df = df[
@@ -217,9 +205,6 @@ elif view == "📚 Trade History":
         (df["timestamp"].dt.normalize() <= end_date) & 
         (df["order_type"] == order_type)
     ]
-    
-    # Debug: Check filtered data before displaying
-    st.write(f"Filtered Trade Data (after filtering):\n{filtered_df.head()}")
 
     # If filtered data is empty, provide feedback to the user
     if filtered_df.empty:

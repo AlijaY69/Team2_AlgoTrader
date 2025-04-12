@@ -10,9 +10,12 @@ from core.strategy import (
     compute_position_size,
     limit_order_price,
     confirm_with_orderbook_pressure,
-    confirm_with_volatility_band
+    confirm_with_volatility_band,
+    is_volatile_enough
 )
 from core.logger import log_trade
+import pandas as pd
+from core.api_client import get_stock_history
 
 # --- CONFIG LOAD ---
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
@@ -79,8 +82,7 @@ def maintain_passive_limit_orders(symbol, current_price, cash, position, volatil
         else:
             print(f"⚠️ Skipped SELL layer {i} — not enough inventory ({position})")
 
-
-# --- MAIN LOOP ---
+# --- VOLATILITY ADJUSTMENT ---
 def adjust_volatility_filter(cooldown_period, last_trade_time, volatility, default_threshold=0.005, relaxed_threshold=0.008):
     """ Dynamically adjusts the volatility filter if idle time exceeds cooldown period """
     if time.time() - last_trade_time > cooldown_period:
@@ -89,6 +91,7 @@ def adjust_volatility_filter(cooldown_period, last_trade_time, volatility, defau
         return relaxed_threshold
     return default_threshold
 
+# --- MAIN LOOP ---
 def run_trading_loop(interval=2):
     global last_signal, last_price, pending_limit_order_id, pending_limit_timestamp
     global last_trade_time, last_networth, total_limit_orders, total_market_orders, total_signals
@@ -115,6 +118,10 @@ def run_trading_loop(interval=2):
         orderbook = market_data.get("orderbook", {})
 
         print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💰 Cash=${cash:.2f} | Pos={position} | NW=${net_worth:.2f} | Price=${current_price:.2f} | Vol={volatility:.2%}")
+
+        # Fetch stock history for both fast and slow intervals
+        df_fast = pd.DataFrame(get_stock_history(symbol, interval="1m", points=50))
+        df_slow = pd.DataFrame(get_stock_history(symbol, interval="5m", points=50))
 
         try:
             signal = strategy_fn(symbol, **strategy_params)

@@ -41,7 +41,7 @@ total_signals = 0
 last_exposure_time = None
 
 # --- PASSIVE LAYERED LIMITS ---
-def maintain_passive_limit_orders(symbol, current_price, cash, position, volatility, auth, levels=5, spread_base=0.03, max_spread=0.15):
+def maintain_passive_limit_orders(symbol, current_price, cash, position, volatility, auth, levels=3, spread_base=0.03, max_spread=0.15):
     """ Adds volatility consideration to the passive grid strategy """
     spread = min(spread_base + 0.5 * volatility, max_spread)
     base_qty = compute_position_size(cash, current_price, volatility)
@@ -81,6 +81,14 @@ def maintain_passive_limit_orders(symbol, current_price, cash, position, volatil
 
 
 # --- MAIN LOOP ---
+def adjust_volatility_filter(cooldown_period, last_trade_time, volatility, default_threshold=0.005, relaxed_threshold=0.008):
+    """ Dynamically adjusts the volatility filter if idle time exceeds cooldown period """
+    if time.time() - last_trade_time > cooldown_period:
+        # Relax volatility threshold due to inactivity
+        print("Relaxing volatility threshold due to inactivity")
+        return relaxed_threshold
+    return default_threshold
+
 def run_trading_loop(interval=2):
     global last_signal, last_price, pending_limit_order_id, pending_limit_timestamp
     global last_trade_time, last_networth, total_limit_orders, total_market_orders, total_signals
@@ -125,10 +133,19 @@ def run_trading_loop(interval=2):
         if pending_limit_order_id:
             age = time.time() - pending_limit_timestamp
             if age > stale_limit_lifetime:
-                # Removing stale orders logic for now.
-                pending_limit_order_id = None
-                pending_limit_timestamp = None
-                last_signal = None
+                # Place market order as a backup if the limit order is stale
+                print(f"❌ Limit order {pending_limit_order_id} is stale, placing market order instead.")
+                resp = place_order(
+                    user_id=user_id,
+                    symbol=symbol,
+                    side=signal,
+                    quantity=qty,
+                    order_type="market",
+                    auth=auth
+                )
+                print(f"✅ Market order executed: {resp}")
+                pending_limit_order_id = None  # Reset pending limit order
+                last_trade_time = time.time()  # Log the trade time
             else:
                 print(f"⏳ LIMIT order {pending_limit_order_id} alive for {age:.1f}s")
 
@@ -138,6 +155,11 @@ def run_trading_loop(interval=2):
             loosen = volatility > 0.015 or has_held_long or price_delta > 0.01
 
             print(f"[FILTER] ΔPrice={price_delta:.4f} | HeldLong={has_held_long} | Loosen={loosen}")
+            volatility_threshold = adjust_volatility_filter(cooldown_period, last_trade_time, volatility)
+            if not is_volatile_enough(df_fast, threshold=volatility_threshold):
+                print("❌ Blocked by volatility filter")
+                continue
+
             band_ok = confirm_with_volatility_band(current_price, current_price, volatility)
             ob_ok = confirm_with_orderbook_pressure(orderbook, signal)
 
@@ -153,7 +175,7 @@ def run_trading_loop(interval=2):
                 print("⚠️ Cannot SELL — insufficient holdings")
                 continue
 
-            buffer_pct = 0.002
+            buffer_pct = 0.005  # Tighter limit buffer
             limit_price = round(current_price * (1 - buffer_pct), 2) if signal == "buy" else round(current_price * (1 + buffer_pct), 2)
 
             print(f"📝 LIMIT {signal.upper()} @ {limit_price:.2f} x{qty}")

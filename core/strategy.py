@@ -1,4 +1,3 @@
-# file: core/strategy.py
 import pandas as pd
 from core.api_client import get_stock_history
 
@@ -33,7 +32,7 @@ def multi_timeframe_sma_strategy(symbol, short=3, long=10, fast_interval="1m", s
     slow_trend = df_slow.iloc[-1]["Trend"]
 
     # 🚀 Loosen volatility to encourage trade during moderate noise
-    if not is_volatile_enough(df_fast, threshold=0.0035):
+    if not is_volatile_enough(df_fast, threshold=0.005):  # Updated threshold
         return "hold"
 
     if fast_signal == 1 and slow_trend == 1:
@@ -44,7 +43,7 @@ def multi_timeframe_sma_strategy(symbol, short=3, long=10, fast_interval="1m", s
         return "hold"
 
 # --- Filters ---
-def is_volatile_enough(df, threshold=0.0035):
+def is_volatile_enough(df, threshold=0.005):  # Increased threshold
     df['pct_change'] = df['price'].pct_change()
     recent_vol = df['pct_change'].rolling(window=3).std().iloc[-1]
     return recent_vol > threshold
@@ -91,7 +90,7 @@ def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.2, levels=
 
 
 # --- Orders ---
-def limit_order_price(signal, current_price, buffer_pct=0.0075):
+def limit_order_price(signal, current_price, buffer_pct=0.005):  # Reduced buffer
     if signal == "buy":
         return round(current_price * (1 + buffer_pct), 2)
     elif signal == "sell":

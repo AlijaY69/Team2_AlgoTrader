@@ -6,13 +6,12 @@
     "interval": 60,
     "strategy": "multi_sma",
     "strategy_params": {
-      "short": 3,
-      "long": 10,
-      "fast_interval": "1m",
-      "slow_interval": "5m",
-      "points": 50
+        "short": 2,
+        "long": 5,
+        "fast_interval": "1m",
+        "slow_interval": "3m",
+        "points": 50
     },
     "limit_lifetime": 180,
     "cooldown": 90
-  }
-  
+}

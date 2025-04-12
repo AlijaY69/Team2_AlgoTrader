@@ -1,4 +1,3 @@
-# file: core/strategy_selector.py
 from core.strategy import multi_timeframe_sma_strategy
 
 def select_strategy(strategy_name):

@@ -1,6 +1,6 @@
-# file: core/api_client.py
 import requests
 from requests.auth import HTTPBasicAuth
+import time
 
 BASE_URL = "http://82.29.197.23:8000"
 USER_ID = "2"
@@ -49,6 +49,9 @@ def place_order(user_id, symbol, side, quantity, order_type="market", limit_pric
     try:
         resp = requests.post(f"{BASE_URL}/orders/", json=data, auth=HTTPBasicAuth(*auth))
         resp.raise_for_status()
+        if resp.status_code == 400:  # Handle API overloads and rate-limits
+            print(f"⚠️ Rate limit hit or bad request: {resp.text}")
+            time.sleep(2)  # Add some delay if necessary
         return resp.json()
     except requests.exceptions.RequestException as e:
         print(f"❌ Order failed: {e}")
@@ -56,21 +59,52 @@ def place_order(user_id, symbol, side, quantity, order_type="market", limit_pric
             print(f"Response: {e.response.text}")
         return None
 
-def cancel_order(order_id, auth):
+def cancel_all_orders_aggressively(auth):
+    """ Aggressively cancel all orders but with rate limits to avoid overwhelming the API. """
+    orders = get_orders(auth)
+    if not orders:
+        print("No orders to cancel.")
+        return
+    for order in orders:
+        order_id = order.get("order_id")
+        if order_id:
+            cancel_order(order_id, auth)
+            time.sleep(0.15)  # Aggressive but more controlled cancellation interval
+        else:
+            print("⚠️ Missing order ID for cancellation.")
+    print("✅ All orders attempted for cancellation.")
+
+
+def get_orders(auth):
+    """ Fetch all open orders to process cancellation. """
     try:
-        resp = requests.delete(f"{BASE_URL}/orders/cancel", json={"order_id": order_id}, auth=HTTPBasicAuth(*auth))
+        orders_resp = requests.get(f"{BASE_URL}/orders", auth=auth)
+        orders_resp.raise_for_status()
+        return orders_resp.json()  # List of active orders
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error fetching orders: {e}")
+        return []
+
+def cancel_order(order_id, auth):
+    """ Attempt to cancel a single order using DELETE method. """
+    try:
+        resp = requests.delete(f"{BASE_URL}/orders/{order_id}/cancel", auth=auth)
         resp.raise_for_status()
-        print(f"❎ Canceled stale limit order: {order_id}")
+        print(f"❎ Canceled order: {order_id}")
     except requests.exceptions.RequestException as e:
         print(f"❌ Failed to cancel order {order_id}: {e}")
 
 def cancel_all_orders(auth):
-    try:
-        resp = requests.delete(f"{BASE_URL}/orders/cancel_all", auth=HTTPBasicAuth(*auth))
-        resp.raise_for_status()
-        return resp.json()  # Might contain {"status": "success", "canceled": [...]}
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Failed to cancel all orders: {e}")
-        if hasattr(e, 'response') and hasattr(e.response, 'text'):
-            print(f"Response: {e.response.text}")
-        return {"status": "error", "error": str(e)}
+    """ Cancel all orders one by one. """
+    orders = get_orders(auth)
+    if not orders:
+        print("No orders to cancel.")
+        return
+    for order in orders:
+        order_id = order.get("order_id")
+        if order_id:
+            cancel_order(order_id, auth)
+        else:
+            print("⚠️ Missing order ID for cancellation.")
+    print("✅ All orders attempted for cancellation.")
+

@@ -49,6 +49,7 @@ def is_volatile_enough(df, threshold=0.0035):
     recent_vol = df['pct_change'].rolling(window=3).std().iloc[-1]
     return recent_vol > threshold
 
+
 def confirm_with_volatility_band(price, sma_long, volatility, multiplier=1.25):
     if price < sma_long - multiplier * sma_long * volatility:
         return "buy"
@@ -56,12 +57,25 @@ def confirm_with_volatility_band(price, sma_long, volatility, multiplier=1.25):
         return "sell"
     return "hold"
 
-def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.2):
+def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.2, levels=5):
+    """
+    Confirms whether the orderbook pressure supports a buy or sell action by considering multiple levels.
+
+    Arguments:
+    - orderbook (dict): Orderbook data containing buy and sell orders.
+    - direction (str): Direction of the order, either "buy" or "sell".
+    - threshold (float): Ratio of buy to sell pressure required to execute the order.
+    - levels (int): Number of order levels to evaluate for pressure (more levels means deeper evaluation).
+
+    Returns:
+    - bool: True if orderbook pressure supports the direction, False otherwise.
+    """
     buy_key = "buy_orders" if "buy_orders" in orderbook else "buy"
     sell_key = "sell_orders" if "sell_orders" in orderbook else "sell"
 
-    buy_qty = sum([level.get("volume", level.get("quantity", 0)) for level in orderbook.get(buy_key, [])])
-    sell_qty = sum([level.get("volume", level.get("quantity", 0)) for level in orderbook.get(sell_key, [])])
+    # Summing the volumes at multiple price levels
+    buy_qty = sum([level.get("volume", level.get("quantity", 0)) for level in orderbook.get(buy_key, [])[:levels]])
+    sell_qty = sum([level.get("volume", level.get("quantity", 0)) for level in orderbook.get(sell_key, [])[:levels]])
 
     if buy_qty == 0 or sell_qty == 0:
         return True
@@ -74,6 +88,7 @@ def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.2):
         return True
 
     return False
+
 
 # --- Orders ---
 def limit_order_price(signal, current_price, buffer_pct=0.0075):

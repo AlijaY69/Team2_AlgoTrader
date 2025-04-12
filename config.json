@@ -4,12 +4,14 @@
     "symbol": "HACK",
     "quantity": 5,
     "interval": 60,
-    "strategy": "simple_sma",
+    "strategy": "multi_sma",
     "strategy_params": {
-      "short": 5,
-      "long": 20,
-      "interval": "5m",
+      "short": 3,
+      "long": 10,
+      "fast_interval": "1m",
+      "slow_interval": "5m",
       "points": 50
-    }
+    },
+    "limit_lifetime": 180
   }
   

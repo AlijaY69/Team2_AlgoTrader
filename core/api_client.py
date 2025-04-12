@@ -30,12 +30,7 @@ def get_account(auth):
     try:
         resp = requests.get(f"{BASE_URL}/accounts/{USER_ID}", auth=HTTPBasicAuth(*auth))
         resp.raise_for_status()
-        data = resp.json()
-        return {
-            "cash": round(data.get("cash", 0), 2),
-            "positions": data.get("positions", {}),
-            "net_worth": round(data.get("net_worth", 0), 2)
-        }
+        return resp.json()  # ✅ Return full object, not partial dict
     except Exception as e:
         print(f"❌ Error fetching account: {e}")
         return None

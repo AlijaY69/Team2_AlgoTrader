@@ -5,9 +5,9 @@ import pandas as pd
 
 from core.api_client import get_market_data, place_order, get_account
 from core.strategy_selector import select_strategy
-from core.strategy import compute_position_size, orderbook_pressure  # ✅ Added orderbook_pressure
+from core.strategy import compute_position_size, limit_order_price
 
-# 🧾 Load config
+# --- CONFIG LOAD ---
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
@@ -19,16 +19,20 @@ interval = config.get("interval", 60)
 auth = (str(user_id), config["password"])
 
 strategy_fn, strategy_params = select_strategy(strategy_name)
+last_signal = None
+pending_limit_order_id = None
 
-# 🌀 Real-time trading loop
+# --- TRADING LOOP ---
 def run_trading_loop(interval=60):
-    last_signal = None
+    global last_signal, pending_limit_order_id
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🌀 Starting trading loop on {symbol}, interval = {interval}s")
 
     while True:
         account = get_account(auth)
         cash = float(account.get("cash", 0))
-        position = account.get("positions", {}).get(symbol, 0)
+        # Support both legacy and correct field names
+        positions = account.get("open_positions") or account.get("positions") or {}
+        position = positions.get(symbol, 0)
         net_worth = cash + position * account.get("stock_prices", {}).get(symbol, 0)
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💼 Account: Cash = ${cash:.2f} | {symbol} = {position} | Net Worth = ${net_worth:.2f}")
@@ -52,17 +56,6 @@ def run_trading_loop(interval=60):
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📊 Strategy Signal: {signal}")
 
-        # 🧭 Adjust signal based on orderbook pressure
-        pressure = orderbook_pressure(market_data["orderbook"])
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🧭 Orderbook Pressure: {pressure}")
-
-        if pressure == "buy" and signal == "sell":
-            print("⚠️ SELL signal overridden by BUY pressure → holding")
-            signal = "hold"
-        elif pressure == "sell" and signal == "buy":
-            print("⚠️ BUY signal overridden by SELL pressure → holding")
-            signal = "hold"
-
         if signal != last_signal and signal in ["buy", "sell"]:
             quantity = compute_position_size(cash, current_price, volatility)
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📐 Quantity Computed: {quantity} (Volatility = {volatility:.3f})")
@@ -70,22 +63,37 @@ def run_trading_loop(interval=60):
             if signal == "sell" and position == 0:
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Cannot SELL — you hold 0 shares.")
             else:
+                if volatility > 0.08:
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚡ High Volatility — Using MARKET order")
+                    order_type = "market"
+                    limit_price = None
+                else:
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💡 Low Volatility — Using LIMIT order")
+                    order_type = "limit"
+                    limit_price = limit_order_price(signal, current_price)
+
                 response = place_order(
                     user_id=user_id,
                     symbol=symbol,
                     side=signal,
                     quantity=quantity,
-                    order_type="market",
+                    order_type=order_type,
+                    limit_price=limit_price,
                     auth=auth
                 )
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Order response: {response}")
+
+                # Store limit order ID for future stale-checking
+                if order_type == "limit" and response and "order_id" in response:
+                    pending_limit_order_id = response["order_id"]
+
                 last_signal = signal
         else:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⏸ No signal change, no action taken.")
 
         time.sleep(interval)
 
-# 🧠 CLI support
+# --- CLI ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="Run in continuous trading mode")

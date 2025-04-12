@@ -15,29 +15,62 @@ def simple_sma_strategy(symbol, short=5, long=20, interval="5m", points=50):
     df['Signal'] = (df['SMA_short'] > df['SMA_long']).astype(int)
     df['Position'] = df['Signal'].diff()
 
-    # ✅ Copy clean subset before mutation
+    # ✅ Clean data before further logic
     df_clean = df.dropna(subset=['SMA_short', 'SMA_long', 'Signal', 'Position']).copy()
     if df_clean.empty:
         print("⚠️ Not enough data to generate a signal yet.")
         return "hold"
 
-    # ⛔ Filter out weak signals under low volatility
+    # ⛔ Avoid trading in flat markets
     if not is_volatile_enough(df_clean, threshold=0.005):
         return "hold"
 
-    # 🧠 Use last row for signal
-    last_signal_row = df_clean.iloc[-1]
-    if last_signal_row["Position"] == 1:
+    # 🧠 Final signal
+    last = df_clean.iloc[-1]
+    if last["Position"] == 1:
         return "buy"
-    elif last_signal_row["Position"] == -1:
+    elif last["Position"] == -1:
         return "sell"
     else:
         return "hold"
+
+# --- Signal validation helpers ---
 
 def is_volatile_enough(df, threshold=0.005):
     df['pct_change'] = df['price'].pct_change()
     recent_vol = df['pct_change'].rolling(window=5).std().iloc[-1]
     return recent_vol > threshold
+
+def confirm_with_volatility_band(price, sma_long, volatility, multiplier=1.5):
+    """
+    Confirm trade only if price diverges from SMA_long enough.
+    """
+    if price < sma_long - multiplier * sma_long * volatility:
+        return "buy"
+    elif price > sma_long + multiplier * sma_long * volatility:
+        return "sell"
+    return "hold"
+
+def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.3):
+    """
+    Confirm signal only if the orderbook supports the trade direction.
+    """
+    buy_qty = sum([level['quantity'] for level in orderbook.get('buy', [])])
+    sell_qty = sum([level['quantity'] for level in orderbook.get('sell', [])])
+
+    if buy_qty == 0 or sell_qty == 0:
+        return True  # no resistance
+
+    ratio = buy_qty / sell_qty
+
+    if direction == "buy" and ratio > threshold:
+        return True
+    if direction == "sell" and ratio < 1 / threshold:
+        return True
+
+    return False
+
+# --- Order construction helpers ---
 
 def limit_order_price(signal, current_price, buffer_pct=0.01):
     if signal == "buy":
@@ -61,22 +94,3 @@ def compute_position_size(cash, current_price, volatility, cash_pct=0.05, max_pe
         qty = int(qty * 0.7)  # Reduce by 30%
 
     return max(qty, min_qty)
-
-def orderbook_pressure(orderbook, threshold=1.3):
-    """
-    Returns 'buy', 'sell', or 'neutral' based on volume imbalance.
-    """
-    buy_qty = sum([level['quantity'] for level in orderbook.get('buy', [])])
-    sell_qty = sum([level['quantity'] for level in orderbook.get('sell', [])])
-
-    if sell_qty == 0 or buy_qty == 0:
-        return "neutral"
-
-    ratio = buy_qty / sell_qty
-
-    if ratio > threshold:
-        return "buy"
-    elif ratio < 1 / threshold:
-        return "sell"
-    else:
-        return "neutral"

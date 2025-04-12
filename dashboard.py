@@ -1,5 +1,4 @@
 from pathlib import Path
-# file: streamlit_dashboard.py
 import streamlit as st
 import json, time, os
 import pandas as pd
@@ -13,7 +12,9 @@ from core.strategy import (
     limit_order_price,
     confirm_with_orderbook_pressure,
     confirm_with_volatility_band,
+    compute_dynamic_weighted_sma  # Importing the dynamic SMA function
 )
+from core.logger import log_trade  # Import the logging function
 
 # --- Config ---
 CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
@@ -36,15 +37,35 @@ if view == "📈 Live Dashboard":
     st.title("📈 Real-Time Trading Dashboard")
     account = get_account(auth)
     market_data = get_market_data(symbol, auth)
-    signal = strategy_fn(symbol, **strategy_params)
+
+    # Fetch current volatility and calculate dynamic weighted SMA
+    volatility = market_data["stock"]["volatility"]
+    weighted_sma = compute_dynamic_weighted_sma(symbol, auth, short_period=10, long_period=20, volatility=volatility)
+
+    # Fetch current price and check if it's valid (i.e., not None)
+    current_price = market_data["stock"].get("price")
+
+    # Debugging: Log the values to see why they might be None
+    st.write(f"Current Price: {current_price}, Weighted SMA: {weighted_sma}")
+
+    # Add validation for None values
+    if current_price is None:
+        st.warning("Current price is missing.")
+        current_price = 0  # Fallback value (or another appropriate value)
+    
+    if weighted_sma is None:
+        st.warning("Weighted SMA is missing.")
+        weighted_sma = 0  # Fallback value (or another appropriate value)
+    
+    # Signal generation based on the weighted SMA
+    signal = "buy" if current_price > weighted_sma else "sell"
 
     cash = float(account.get("cash", 0))
     position = account.get("open_positions", {}).get(symbol, 0)
-    current_price = market_data["stock"]["price"]
-    volatility = market_data["stock"]["volatility"]
-    orderbook = market_data.get("orderbook", {})
     net_worth = account.get("networth", cash + position * current_price)
+    orderbook = market_data.get("orderbook", {})
 
+    # Display account, market, and signal metrics
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("💼 Account")
@@ -59,20 +80,20 @@ if view == "📈 Live Dashboard":
         st.subheader("🧠 Signal")
         st.metric("Last Signal", signal.upper())
 
+    # Signal explanation with the dynamic weighted SMA logic
     st.markdown("### 🔍 Signal Explanation")
     explanation = ""
     confirmed = True
-    sma_long = strategy_params.get("sma_long") or strategy_params.get("long", 20)
     band_check = confirm_with_volatility_band(current_price, current_price, volatility)
     if band_check != signal:
-        explanation += "❌ Rejected by volatility band filter\\n"
+        explanation += "❌ Rejected by volatility band filter\n"
         confirmed = False
     ob_check = confirm_with_orderbook_pressure(orderbook, signal)
     if not ob_check:
-        explanation += "❌ Rejected by order book pressure filter\\n"
+        explanation += "❌ Rejected by order book pressure filter\n"
         confirmed = False
     if confirmed and signal in ["buy", "sell"]:
-        explanation += f"✅ {signal.upper()} confirmed by SMA crossover, volatility, and orderbook."
+        explanation += f"✅ {signal.upper()} confirmed by Weighted SMA, volatility, and orderbook."
     else:
         explanation += f"💤 Holding — blocked by filters or SMA."
     st.code(explanation.strip(), language="markdown")
@@ -111,15 +132,22 @@ if view == "📈 Live Dashboard":
     else:
         st.warning("⚠️ No valid order book data available to plot.")
 
+    # Manual Signal Override
     st.markdown("### 🎮 Manual Signal Override")
     override_col1, override_col2, override_col3 = st.columns(3)
     override_result = ""
+
     def handle_manual_order(side):
         qty = compute_position_size(cash, current_price, volatility)
         order_type = "market" if volatility > 0.08 else "limit"
         limit_price = None if order_type == "market" else limit_order_price(side, current_price)
         response = place_order(user_id=user_id, symbol=symbol, side=side, quantity=qty, order_type=order_type, limit_price=limit_price, auth=auth)
+
+        # Log the trade after it is placed
+        log_trade(symbol=symbol, side=side, quantity=qty, price=current_price, volatility=volatility, order_type=order_type, cash=cash, net_worth=net_worth)
+
         return f"{side.upper()} order sent (qty={qty}, type={order_type}) → {response}"
+
     with override_col1:
         if st.button("📥 Force BUY"):
             override_result = handle_manual_order("buy")
@@ -138,6 +166,7 @@ if view == "📈 Live Dashboard":
                 override_result = f"❌ Failed to cancel orders: {result}"
     if override_result:
         st.success(override_result)
+
     st.caption("⏳ Auto-refreshes every 60 seconds")
     time.sleep(60)
     st.rerun()
@@ -145,13 +174,21 @@ if view == "📈 Live Dashboard":
 # === View 2: TRADE LOG ===
 elif view == "📚 Trade History":
     st.title("📚 Trade History")
+
+    # Check if trade logs exist
     if not os.path.exists(LOG_PATH):
         st.warning("No trades logged yet.")
         st.stop()
+
+    # Load and prepare data
     df = pd.read_csv(LOG_PATH)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df.sort_values("timestamp", ascending=False, inplace=True)
+
+    # Add color-coded metrics for profit/loss
     latest_trade = df.iloc[0]
+    profit_loss = latest_trade["net_worth"] - latest_trade["cash"]
+
     st.metric("🕒 Last Trade", latest_trade["timestamp"].strftime("%Y-%m-%d %H:%M:%S"))
     st.metric("📈 Last Price", f"${latest_trade['price']:.2f}")
     st.metric("📦 Last Position Size", f"{latest_trade['quantity']} {latest_trade['symbol']}")
@@ -160,7 +197,39 @@ elif view == "📚 Trade History":
     st.metric("💸 Cash", f"${latest_trade['cash']:.2f}")
     st.metric("📐 Order Type", latest_trade["order_type"].upper())
     st.metric("🔁 Trade Direction", latest_trade["side"].upper())
-    st.dataframe(df, use_container_width=True)
+
+    # Adding profit/loss with color feedback
+    if profit_loss >= 0:
+        st.metric("💵 Profit/Loss", f"+${profit_loss:.2f}", delta_color="normal")  # "normal" for positive values
+    else:
+        st.metric("💵 Profit/Loss", f"${profit_loss:.2f}", delta_color="inverse")  # "inverse" for negative values
+
+    # Filter options for better interaction
+    st.markdown("### 🔎 Filter Trade History")
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+    with filter_col1:
+        start_date = st.date_input("Start Date", df["timestamp"].min())
+    with filter_col2:
+        end_date = st.date_input("End Date", df["timestamp"].max())
+    with filter_col3:
+        order_type = st.selectbox("Order Type", df["order_type"].unique())
+
+    # Filter the data based on user input
+    filtered_df = df[
+        (df["timestamp"] >= pd.to_datetime(start_date)) & 
+        (df["timestamp"] <= pd.to_datetime(end_date)) & 
+        (df["order_type"] == order_type)
+    ]
+
+    st.dataframe(filtered_df, use_container_width=True)
+
+    # Plotting net worth over time
+    st.markdown("### 📊 Net Worth Over Time")
     df_chart = df.copy().sort_values("timestamp")
     st.line_chart(df_chart.set_index("timestamp")[["net_worth"]])
 
+    # Scatter plot for Profit/Loss by date
+    st.markdown("### 📈 Profit/Loss Scatter")
+    df['profit_loss'] = df["net_worth"] - df["cash"]
+    st.scatter_chart(df.set_index("timestamp")[["profit_loss"]])

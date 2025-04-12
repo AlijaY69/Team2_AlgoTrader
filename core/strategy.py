@@ -1,5 +1,6 @@
 import pandas as pd
-from core.api_client import get_stock_history
+from core.api_client import get_stock_history, get_market_data
+import numpy as np
 
 # --- Core Strategy ---
 def multi_timeframe_sma_strategy(symbol, short=3, long=10, fast_interval="1m", slow_interval="5m", points=50):
@@ -48,7 +49,6 @@ def is_volatile_enough(df, threshold=0.005):  # Increased threshold
     recent_vol = df['pct_change'].rolling(window=3).std().iloc[-1]
     return recent_vol > threshold
 
-
 def confirm_with_volatility_band(price, sma_long, volatility, multiplier=1.25):
     if price < sma_long - multiplier * sma_long * volatility:
         return "buy"
@@ -88,7 +88,6 @@ def confirm_with_orderbook_pressure(orderbook, direction, threshold=1.2, levels=
 
     return False
 
-
 # --- Orders ---
 def limit_order_price(signal, current_price, buffer_pct=0.005):  # Reduced buffer
     if signal == "buy":
@@ -105,3 +104,43 @@ def compute_position_size(cash, current_price, volatility, cash_pct=0.08, max_pe
     if volatility > 0.15:
         qty = int(qty * 0.7)
     return max(qty, min_qty)
+
+# --- Dynamic Weighted SMA ---
+def compute_dynamic_weighted_sma(symbol, auth, short_period=10, long_period=20, volatility=0.05):
+    """
+    Compute the dynamic weighted SMA based on volatility.
+
+    Arguments:
+    - symbol: The stock symbol (string)
+    - auth: The authentication tuple (string, string)
+    - short_period: The short period for the SMA (int)
+    - long_period: The long period for the SMA (int)
+    - volatility: The current volatility (float)
+
+    Returns:
+    - weighted_sma: The dynamically adjusted weighted SMA (float)
+    """
+    
+    # Get historical market data (e.g., closing prices)
+    market_data = get_market_data(symbol, auth)  # Pass the auth parameter here
+    historical_prices = market_data.get("history", {}).get("prices", [])
+
+    if len(historical_prices) < long_period:
+        print(f"⚠️ Insufficient historical data for {symbol}. Only {len(historical_prices)} data points available.")
+        # Return a fallback value (e.g., the current price or NaN)
+        return None  # Or you can return the current price as a fallback
+
+    # Extract closing prices
+    close_prices = [price['close'] for price in historical_prices[-long_period:]]  # Last 'long_period' prices
+
+    # Calculate SMAs
+    short_sma = np.mean(close_prices[-short_period:])  # Short-term SMA (most recent short_period prices)
+    long_sma = np.mean(close_prices)  # Long-term SMA (average of the last 'long_period' prices)
+
+    # Adjust the weight based on volatility
+    weight = max(0.1, min(1, 1 - volatility))  # Adjust weight inversely to volatility (higher volatility = lower weight)
+    
+    # Calculate the weighted SMA by blending short and long SMAs based on volatility
+    weighted_sma = short_sma * weight + long_sma * (1 - weight)
+
+    return weighted_sma

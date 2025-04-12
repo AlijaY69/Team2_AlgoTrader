@@ -3,8 +3,13 @@
     "password": "Ahojpepiku45",
     "symbol": "HACK",
     "quantity": 5,
-    "short_window": 5,
-    "long_window": 20,
-    "interval": 60
+    "interval": 60,
+    "strategy": "simple_sma",
+    "strategy_params": {
+      "short": 5,
+      "long": 20,
+      "interval": "5m",
+      "points": 50
+    }
   }
   

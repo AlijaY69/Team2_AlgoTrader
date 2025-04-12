@@ -12,6 +12,7 @@
       "slow_interval": "5m",
       "points": 50
     },
-    "limit_lifetime": 180
+    "limit_lifetime": 180,
+    "cooldown": 90
   }
   

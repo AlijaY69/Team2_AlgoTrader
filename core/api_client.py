@@ -30,7 +30,7 @@ def get_account(auth):
     try:
         resp = requests.get(f"{BASE_URL}/accounts/{USER_ID}", auth=HTTPBasicAuth(*auth))
         resp.raise_for_status()
-        return resp.json()  # ✅ Return full object, not partial dict
+        return resp.json()
     except Exception as e:
         print(f"❌ Error fetching account: {e}")
         return None
@@ -55,3 +55,11 @@ def place_order(user_id, symbol, side, quantity, order_type="market", limit_pric
         if hasattr(e, 'response') and hasattr(e.response, 'text'):
             print(f"Response: {e.response.text}")
         return None
+
+def cancel_order(order_id, auth):
+    try:
+        resp = requests.delete(f"{BASE_URL}/orders/cancel", json={"order_id": order_id}, auth=HTTPBasicAuth(*auth))
+        resp.raise_for_status()
+        print(f"❎ Canceled stale limit order: {order_id}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Failed to cancel order {order_id}: {e}")

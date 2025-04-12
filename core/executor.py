@@ -3,11 +3,10 @@ import time, json, argparse
 from pathlib import Path
 import pandas as pd
 
-from core.api_client import get_market_data, place_order, get_account
+from core.api_client import get_market_data, place_order, get_account, cancel_order
 from core.strategy_selector import select_strategy
 from core.strategy import compute_position_size, limit_order_price
 
-# --- CONFIG LOAD ---
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
@@ -16,26 +15,24 @@ user_id = config["user_id"]
 symbol = config["symbol"]
 strategy_name = config.get("strategy", "simple_sma")
 interval = config.get("interval", 60)
+stale_limit_lifetime = config.get("limit_lifetime", 180)  # default 3 minutes
 auth = (str(user_id), config["password"])
 
 strategy_fn, strategy_params = select_strategy(strategy_name)
+
 last_signal = None
 pending_limit_order_id = None
+pending_limit_timestamp = None
 
-# --- TRADING LOOP ---
 def run_trading_loop(interval=60):
-    global last_signal, pending_limit_order_id
+    global last_signal, pending_limit_order_id, pending_limit_timestamp
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🌀 Starting trading loop on {symbol}, interval = {interval}s")
 
     while True:
         account = get_account(auth)
         cash = float(account.get("cash", 0))
-        # Support both legacy and correct field names
         positions = account.get("open_positions") or account.get("positions") or {}
         position = positions.get(symbol, 0)
-        net_worth = cash + position * account.get("stock_prices", {}).get(symbol, 0)
-
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💼 Account: Cash = ${cash:.2f} | {symbol} = {position} | Net Worth = ${net_worth:.2f}")
 
         market_data = get_market_data(symbol, auth)
         if not market_data or "stock" not in market_data:
@@ -45,7 +42,10 @@ def run_trading_loop(interval=60):
 
         current_price = market_data["stock"]["price"]
         volatility = market_data["stock"].get("volatility", 0)
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💲 Current Price: {current_price:.2f}")
+
+        net_worth = float(account.get("networth", cash + position * current_price))  # ✅ FIXED
+
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💼 Account: Cash = ${cash:.2f} | {symbol} = {position} | Net Worth = ${net_worth:.2f}")
 
         try:
             signal = strategy_fn(symbol, **strategy_params)
@@ -55,6 +55,12 @@ def run_trading_loop(interval=60):
             continue
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📊 Strategy Signal: {signal}")
+
+        # 🧼 Cancel stale limit order if expired
+        if pending_limit_order_id and time.time() - pending_limit_timestamp > stale_limit_lifetime:
+            cancel_order(pending_limit_order_id, auth)
+            pending_limit_order_id = None
+            pending_limit_timestamp = None
 
         if signal != last_signal and signal in ["buy", "sell"]:
             quantity = compute_position_size(cash, current_price, volatility)
@@ -83,9 +89,9 @@ def run_trading_loop(interval=60):
                 )
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Order response: {response}")
 
-                # Store limit order ID for future stale-checking
                 if order_type == "limit" and response and "order_id" in response:
                     pending_limit_order_id = response["order_id"]
+                    pending_limit_timestamp = time.time()
 
                 last_signal = signal
         else:
@@ -93,7 +99,6 @@ def run_trading_loop(interval=60):
 
         time.sleep(interval)
 
-# --- CLI ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="Run in continuous trading mode")

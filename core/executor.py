@@ -1,6 +1,7 @@
 # file: core/executor.py
 import time, json, argparse
 from pathlib import Path
+
 from core.api_client import get_market_data, place_order, get_account, cancel_order
 from core.strategy_selector import select_strategy
 from core.strategy import (
@@ -9,6 +10,7 @@ from core.strategy import (
     confirm_with_orderbook_pressure,
     confirm_with_volatility_band
 )
+from core.logger import log_trade  # ✅ New import
 
 # --- CONFIG LOAD ---
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
@@ -62,17 +64,16 @@ def run_trading_loop(interval=60):
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📊 Strategy Signal: {signal}")
 
-        # 🧼 Cancel stale LIMIT orders if needed
+        # 🧼 Cancel stale LIMIT orders
         if pending_limit_order_id and time.time() - pending_limit_timestamp > stale_limit_lifetime:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🔄 Cancelling stale LIMIT order ID {pending_limit_order_id}")
             cancel_order(pending_limit_order_id, auth)
             pending_limit_order_id = None
             pending_limit_timestamp = None
-            last_signal = None  # Allow reentry
+            last_signal = None
 
         # 🚨 FINAL DECISION PIPELINE
         if signal != last_signal and signal in ["buy", "sell"]:
-            sma_long = strategy_params.get("sma_long") or strategy_params.get("long", 20)
             band_confirm = confirm_with_volatility_band(current_price, current_price, volatility)
             ob_confirm = confirm_with_orderbook_pressure(orderbook, signal)
 
@@ -111,6 +112,10 @@ def run_trading_loop(interval=60):
             )
 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Order response: {response}")
+
+            # ✅ Log successful trade
+            if response:
+                log_trade(symbol, signal, quantity, current_price, volatility, order_type, cash, net_worth)
 
             if order_type == "limit" and response and "order_id" in response:
                 pending_limit_order_id = response["order_id"]

@@ -2,12 +2,11 @@
 from pathlib import Path
 import time
 import json
-import pandas as pd
 
-from core.api_client import get_market_data, place_order, get_account
+from core.api_client import get_market_data, place_order
 from core.strategy import simple_sma_strategy, limit_order_price
 
-# Load config from the root directory
+# 📦 Load credentials and symbol info
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
@@ -19,7 +18,7 @@ auth = (str(user_id), config["password"])
 
 def run_trading_loop(interval=60):
     last_signal = None
-    print(f"🚀 Starting trading loop on symbol {symbol} every {interval}s")
+    print(f"🌀 Starting trading loop on {symbol}, interval = {interval}s")
 
     while True:
         market_data = get_market_data(symbol, auth)
@@ -38,11 +37,11 @@ def run_trading_loop(interval=60):
             time.sleep(interval)
             continue
 
-        print(f"📊 Strategy signal: {signal}")
+        print(f"📊 Strategy Signal: {signal}")
 
         if signal != last_signal and signal in ["buy", "sell"]:
             limit_price = limit_order_price(signal, current_price)
-            print(f"📥 Placing LIMIT order to {signal.upper()} {quantity} at ${limit_price}")
+            print(f"🛒 Placing LIMIT order to {signal.upper()} {quantity} at ${limit_price}")
 
             response = place_order(
                 user_id=user_id,
@@ -53,16 +52,13 @@ def run_trading_loop(interval=60):
                 limit_price=limit_price,
                 auth=auth
             )
-            print(f"✅ Order response: {response}")
+            print(f"✅ Order Response: {response}")
             last_signal = signal
         else:
-            print("⏸ No signal change. No order placed.")
+            print("⏸ No signal change, no action taken.")
 
         time.sleep(interval)
 
-# Optional one-time test run
-result = simple_sma_strategy(symbol)
-if result in ["buy", "sell"]:
-    print(f"🧪 Signal: {result} — would place limit order at {limit_order_price(result, 100)}")
-else:
-    print("🧪 Manual test result: hold")
+# 🚀 Launch loop
+if __name__ == "__main__":
+    run_trading_loop(interval=60)

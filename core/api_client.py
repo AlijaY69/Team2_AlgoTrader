@@ -16,11 +16,9 @@ def get_stock_history(symbol, interval="5m", points=50):
     return requests.get(f"{BASE_URL}/stocks/{symbol}/history", params=params, auth=auth).json()
 
 def get_market_data(symbol, auth):
-    # Combines stock data and orderbook
     try:
         stock_resp = requests.get(f"{BASE_URL}/stocks", auth=HTTPBasicAuth(*auth))
         orderbook_resp = requests.get(f"{BASE_URL}/orderbook/?symbol={symbol}", auth=HTTPBasicAuth(*auth))
-
         return {
             "stock": next((s for s in stock_resp.json() if s["symbol"] == symbol), None),
             "orderbook": orderbook_resp.json()

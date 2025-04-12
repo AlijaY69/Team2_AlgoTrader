@@ -4,7 +4,6 @@ from core.api_client import get_stock_history
 
 def simple_sma_strategy(symbol, short=5, long=20, interval="5m", points=50):
     df = pd.DataFrame(get_stock_history(symbol, interval=interval, points=points))
-
     if df.empty or 'price' not in df.columns:
         print(f"⚠️ No data returned for symbol {symbol}")
         return "hold"
@@ -20,7 +19,6 @@ def simple_sma_strategy(symbol, short=5, long=20, interval="5m", points=50):
         return "hold"
 
     last_signal_row = df_clean.iloc[-1]
-
     if last_signal_row["Position"] == 1:
         return "buy"
     elif last_signal_row["Position"] == -1:
@@ -28,15 +26,12 @@ def simple_sma_strategy(symbol, short=5, long=20, interval="5m", points=50):
     else:
         return "hold"
 
-# ➕ Add this function below your strategy
-def limit_order_price(signal, current_price, spread=0.5):
+def limit_order_price(signal, current_price, buffer_pct=0.01):
     """
-    Returns a slightly adjusted limit price depending on signal direction.
-    - Buy: price just BELOW market
-    - Sell: price just ABOVE market
+    Adds a small price buffer to current market price to act like a controlled market order.
     """
     if signal == "buy":
-        return round(current_price * (1 - spread / 100), 2)  # e.g., -0.5%
+        return round(current_price * (1 + buffer_pct), 2)
     elif signal == "sell":
-        return round(current_price * (1 + spread / 100), 2)  # e.g., +0.5%
+        return round(current_price * (1 - buffer_pct), 2)
     return current_price

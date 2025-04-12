@@ -11,8 +11,7 @@ from core.strategy import (
     compute_position_size,
     limit_order_price,
     confirm_with_orderbook_pressure,
-    confirm_with_volatility_band,
-    compute_dynamic_weighted_sma  # Importing the dynamic SMA function
+    confirm_with_volatility_band
 )
 from core.logger import log_trade  # Import the logging function
 
@@ -38,27 +37,22 @@ if view == "📈 Live Dashboard":
     account = get_account(auth)
     market_data = get_market_data(symbol, auth)
 
-    # Fetch current volatility and calculate dynamic weighted SMA
+    # Fetch current volatility
     volatility = market_data["stock"]["volatility"]
-    weighted_sma = compute_dynamic_weighted_sma(symbol, auth, short_period=10, long_period=20, volatility=volatility)
 
     # Fetch current price and check if it's valid (i.e., not None)
     current_price = market_data["stock"].get("price")
 
     # Debugging: Log the values to see why they might be None
-    st.write(f"Current Price: {current_price}, Weighted SMA: {weighted_sma}")
+    st.write(f"Current Price: {current_price}")
 
     # Add validation for None values
     if current_price is None:
         st.warning("Current price is missing.")
         current_price = 0  # Fallback value (or another appropriate value)
     
-    if weighted_sma is None:
-        st.warning("Weighted SMA is missing.")
-        weighted_sma = 0  # Fallback value (or another appropriate value)
-    
-    # Signal generation based on the weighted SMA
-    signal = "buy" if current_price > weighted_sma else "sell"
+    # Signal generation based on the current price only
+    signal = "buy" if current_price > 0 else "sell"
 
     cash = float(account.get("cash", 0))
     position = account.get("open_positions", {}).get(symbol, 0)
@@ -80,7 +74,7 @@ if view == "📈 Live Dashboard":
         st.subheader("🧠 Signal")
         st.metric("Last Signal", signal.upper())
 
-    # Signal explanation with the dynamic weighted SMA logic
+    # Signal explanation with the current price logic
     st.markdown("### 🔍 Signal Explanation")
     explanation = ""
     confirmed = True
@@ -93,9 +87,9 @@ if view == "📈 Live Dashboard":
         explanation += "❌ Rejected by order book pressure filter\n"
         confirmed = False
     if confirmed and signal in ["buy", "sell"]:
-        explanation += f"✅ {signal.upper()} confirmed by Weighted SMA, volatility, and orderbook."
+        explanation += f"✅ {signal.upper()} confirmed by price, volatility, and orderbook."
     else:
-        explanation += f"💤 Holding — blocked by filters or SMA."
+        explanation += f"💤 Holding — blocked by filters."
     st.code(explanation.strip(), language="markdown")
 
     with st.expander("📚 Order Book"):
@@ -182,47 +176,56 @@ elif view == "📚 Trade History":
 
     # Load and prepare data
     df = pd.read_csv(LOG_PATH)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    # Ensure timestamp is in datetime format for proper filtering
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')  # 'coerce' converts invalid dates to NaT
+    
+    # Debug: Check the format of the data before filtering
+    st.write(f"Loaded Trade Data (before filtering):\n{df.head()}")
+    
+    # Ensure there are no missing or invalid timestamps
+    if df["timestamp"].isnull().any():
+        st.warning("Some entries have invalid timestamps and have been converted to NaT.")
+    
+    # Sort data by timestamp
     df.sort_values("timestamp", ascending=False, inplace=True)
-
-    # Add color-coded metrics for profit/loss
-    latest_trade = df.iloc[0]
-    profit_loss = latest_trade["net_worth"] - latest_trade["cash"]
-
-    st.metric("🕒 Last Trade", latest_trade["timestamp"].strftime("%Y-%m-%d %H:%M:%S"))
-    st.metric("📈 Last Price", f"${latest_trade['price']:.2f}")
-    st.metric("📦 Last Position Size", f"{latest_trade['quantity']} {latest_trade['symbol']}")
-    st.metric("💰 Net Worth", f"${latest_trade['net_worth']:.2f}")
-    st.metric("⚡ Volatility", f"{latest_trade['volatility']:.2%}")
-    st.metric("💸 Cash", f"${latest_trade['cash']:.2f}")
-    st.metric("📐 Order Type", latest_trade["order_type"].upper())
-    st.metric("🔁 Trade Direction", latest_trade["side"].upper())
-
-    # Adding profit/loss with color feedback
-    if profit_loss >= 0:
-        st.metric("💵 Profit/Loss", f"+${profit_loss:.2f}", delta_color="normal")  # "normal" for positive values
-    else:
-        st.metric("💵 Profit/Loss", f"${profit_loss:.2f}", delta_color="inverse")  # "inverse" for negative values
 
     # Filter options for better interaction
     st.markdown("### 🔎 Filter Trade History")
     filter_col1, filter_col2, filter_col3 = st.columns(3)
 
     with filter_col1:
-        start_date = st.date_input("Start Date", df["timestamp"].min())
+        start_date = st.date_input("Start Date", df["timestamp"].min().date())
     with filter_col2:
-        end_date = st.date_input("End Date", df["timestamp"].max())
+        end_date = st.date_input("End Date", df["timestamp"].max().date())
     with filter_col3:
         order_type = st.selectbox("Order Type", df["order_type"].unique())
 
-    # Filter the data based on user input
+    # Debug: Check the selected filtering criteria
+    st.write(f"Selected Filter Criteria - Start Date: {start_date}, End Date: {end_date}, Order Type: {order_type}")
+
+    # Convert start and end date to datetime and normalize time (set to midnight)
+    start_date = pd.to_datetime(start_date).normalize()
+    end_date = pd.to_datetime(end_date).normalize()
+
+    # Debug: Show normalized dates
+    st.write(f"Normalized Start Date: {start_date}, Normalized End Date: {end_date}")
+
+    # Filter the data based on user input (date only, ignoring time)
     filtered_df = df[
-        (df["timestamp"] >= pd.to_datetime(start_date)) & 
-        (df["timestamp"] <= pd.to_datetime(end_date)) & 
+        (df["timestamp"].dt.normalize() >= start_date) & 
+        (df["timestamp"].dt.normalize() <= end_date) & 
         (df["order_type"] == order_type)
     ]
+    
+    # Debug: Check filtered data before displaying
+    st.write(f"Filtered Trade Data (after filtering):\n{filtered_df.head()}")
 
-    st.dataframe(filtered_df, use_container_width=True)
+    # If filtered data is empty, provide feedback to the user
+    if filtered_df.empty:
+        st.warning("No trades match the filter criteria.")
+    else:
+        st.dataframe(filtered_df, use_container_width=True)
 
     # Plotting net worth over time
     st.markdown("### 📊 Net Worth Over Time")

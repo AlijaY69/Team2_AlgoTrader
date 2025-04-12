@@ -63,3 +63,14 @@ def cancel_order(order_id, auth):
         print(f"❎ Canceled stale limit order: {order_id}")
     except requests.exceptions.RequestException as e:
         print(f"❌ Failed to cancel order {order_id}: {e}")
+
+def cancel_all_orders(auth):
+    try:
+        resp = requests.delete(f"{BASE_URL}/orders/cancel_all", auth=HTTPBasicAuth(*auth))
+        resp.raise_for_status()
+        return resp.json()  # Might contain {"status": "success", "canceled": [...]}
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Failed to cancel all orders: {e}")
+        if hasattr(e, 'response') and hasattr(e.response, 'text'):
+            print(f"Response: {e.response.text}")
+        return {"status": "error", "error": str(e)}

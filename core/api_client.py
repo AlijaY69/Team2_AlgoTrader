@@ -5,7 +5,6 @@ from requests.auth import HTTPBasicAuth
 BASE_URL = "http://82.29.197.23:8000"
 USER_ID = "2"
 PASSWORD = "Ahojpepiku45"
-
 auth = HTTPBasicAuth(USER_ID, PASSWORD)
 
 def get_stocks():
@@ -19,13 +18,26 @@ def get_market_data(symbol, auth):
     try:
         stock_resp = requests.get(f"{BASE_URL}/stocks", auth=HTTPBasicAuth(*auth))
         orderbook_resp = requests.get(f"{BASE_URL}/orderbook/?symbol={symbol}", auth=HTTPBasicAuth(*auth))
-
         return {
             "stock": next((s for s in stock_resp.json() if s["symbol"] == symbol), None),
             "orderbook": orderbook_resp.json()
         }
     except Exception as e:
         print(f"❌ Error fetching market data: {e}")
+        return None
+
+def get_account(auth):
+    try:
+        resp = requests.get(f"{BASE_URL}/accounts/{USER_ID}", auth=HTTPBasicAuth(*auth))
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "cash": round(data.get("cash", 0), 2),
+            "positions": data.get("positions", {}),
+            "net_worth": round(data.get("net_worth", 0), 2)
+        }
+    except Exception as e:
+        print(f"❌ Error fetching account: {e}")
         return None
 
 def place_order(user_id, symbol, side, quantity, order_type="market", limit_price=None, auth=None):
@@ -48,15 +60,3 @@ def place_order(user_id, symbol, side, quantity, order_type="market", limit_pric
         if hasattr(e, 'response') and hasattr(e.response, 'text'):
             print(f"Response: {e.response.text}")
         return None
-
-def get_account():
-    try:
-        resp = requests.get(f"{BASE_URL}/accounts/{USER_ID}", auth=auth)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"⚠️ Error fetching account: {e}")
-        return {}
-
-def get_portfolio_status():
-    return get_account()

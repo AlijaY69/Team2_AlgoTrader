@@ -1,8 +1,10 @@
 {
-    "user_id": 2,
+    "user_id": "2",
     "password": "Ahojpepiku45",
-    "base_url": "http://82.29.197.23:8000/",
     "symbol": "HACK",
-    "quantity": 5
+    "quantity": 5,
+    "short_window": 5,
+    "long_window": 20,
+    "interval": 60
   }
   
